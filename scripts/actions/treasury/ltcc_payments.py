@@ -61,9 +61,17 @@ class LtccPayments:
     def __init__(self, date_range):
         self.date_range = date_range
         self.recipients = []
+        self.totals = {"usdc": 0, "badger": 0}
 
-    def add_recipient(self, name, address, assets):
+    def add_recipient(self, address, name, assets):
         self.recipients.append(LtccRecipient(name, address, assets))
+
+    def calc_totals(self):
+        totals = {"usdc": 0, "badger": 0}
+        for recipient in self.recipients:
+            totals["usdc"] += recipient.get_amount("usdc")
+            totals["badger"] += recipient.get_amount("badger")
+        self.totals = totals
 
     def print_recipients(self):
         table = []
@@ -84,6 +92,20 @@ class LtccPayments:
                     ),
                 ]
             )
+        table.append(
+            [
+                "Totals",
+                "-",
+                val(
+                    self.totals["usdc"],
+                    decimals=token_metadata.get_decimals(asset_to_address("usdc")),
+                ),
+                val(
+                    self.totals["badger"],
+                    decimals=token_metadata.get_decimals(asset_to_address("badger")),
+                ),
+            ]
+        )
         print("===== LTCC Payments for {} =====".format(self.date_range))
         print(tabulate(table, headers=["name", "address", "usdc", "badger"]))
 
@@ -93,29 +115,35 @@ def load_ltcc_recipients(filepath):
     with open(filepath, newline="") as csvfile:
         reader = csv.reader(csvfile, delimiter="\t", quotechar="|")
         for row in reader:
+            print(row[0], row[1], row[2], row[3])
             payments.add_recipient(row[0], row[1], {"usdc": row[2], "badger": row[3]})
     return payments
+
 
 def badger_to_bBadger(badger, amount):
     bBadger = badger.getSett("native.badger")
     ppfs = bBadger.getPricePerFullShare()
 
-    console.print({
-        'badger amount': amount,
-        'ppfs': ppfs,
-        'mult': 10**badger.token.decimals(),
-        'bBadger amount': amount * 10**badger.token.decimals() // ppfs,
-    })
+    console.print(
+        {
+            "badger amount": amount,
+            "ppfs": ppfs,
+            "mult": 10 ** badger.token.decimals(),
+            "bBadger amount": amount * 10 ** badger.token.decimals() // ppfs,
+        }
+    )
 
-    return amount * 10**badger.token.decimals() // ppfs
+    return amount * 10 ** badger.token.decimals() // ppfs
+
 
 def main():
     badger = connect_badger()
-    multisig = badger.devMultisig
+    multisig = badger.treasuryMultisig
 
     safe = ApeSafe(multisig.address)
 
     payments = load_ltcc_recipients("scripts/actions/treasury/ltcc_recipients.csv")
+    payments.calc_totals()
     payments.print_recipients()
 
     abi = Sett.abi
@@ -123,21 +151,38 @@ def main():
         badger.getSett("native.badger").address, "Sett", abi
     )
 
-    usdcToken = safe.contract_from_abi(registry.tokens.usdc, "IERC20", interface.IERC20.abi)
-    badgerToken = safe.contract_from_abi(badger.token.address, "IERC20", interface.IERC20.abi)
+    usdcToken = safe.contract_from_abi(
+        registry.tokens.usdc, "IERC20", interface.IERC20.abi
+    )
+    badgerToken = safe.contract_from_abi(
+        badger.token.address, "IERC20", interface.IERC20.abi
+    )
 
-    # TODO: Do this in bBadger going forward - this is the way. 
+    # TODO: Do this in bBadger going forward - this is the way.
     # Approve treasury multi to stake
     # Deposit badger -> bBadger
 
     snap = BalanceSnapshotter(
-        [badgerToken, bBadger, usdcToken], [multisig, badger.deployer, badger.rewardsEscrow]
+        [badgerToken, bBadger, usdcToken],
+        [multisig, badger.deployer, badger.rewardsEscrow],
     )
 
     for recipient in payments.recipients:
         snap.add_account(recipient.address)
 
-    snap.snap(name="Before Transfers")
+    snap.snap(name="Before bBadger Deposit")
+
+    # assert bBadger.approved(multisig)
+    # badger_total = payments.totals["badger"]
+    # assert badgerToken.balanceOf(multisig.address) >= badger_total
+    # bBadger_total = badger_to_bBadger(badger, badger_total)
+    # badgerToken.approve(bBadger, badger_total)
+
+    # assert badgerToken.allowance(multisig.address, bBadger.address) >= badger_total
+    # bBadger.deposit(badger_total)
+
+    # snap.snap(name="Before Transfers")
+    # snap.diff_last_two()
 
     for recipient in payments.recipients:
         bBadger_amount = badger_to_bBadger(badger, recipient.get_amount("badger"))
@@ -150,7 +195,7 @@ def main():
             assert diff < Wei("0.1 ether")
             bBadger_amount = bBadger.balanceOf(multisig)
 
-        # tx = usdcToken.transfer(recipient.address, recipient.get_amount("usdc"))
+        tx = usdcToken.transfer(recipient.address, recipient.get_amount("usdc"))
         tx = bBadger.transfer(recipient.address, bBadger_amount)
 
     snap.snap(name="After Transfers")
@@ -160,4 +205,3 @@ def main():
     safe.preview(safe_tx)
     data = safe.print_transaction(safe_tx)
     safe.post_transaction(safe_tx)
-

@@ -6,6 +6,7 @@ name_to_artifact = {
     "RewardsEscrow": RewardsEscrow,
     "BadgerGeyser": BadgerGeyser,
     "BadgerTree": BadgerTree,
+    "BadgerTreeV2": BadgerTreeV2,
     "BadgerHunt": BadgerHunt,
     "SimpleTimelock": SimpleTimelock,
     "Controller": Controller,
@@ -27,6 +28,8 @@ name_to_artifact = {
     "StrategyDiggLpMetaFarm": StrategyDiggLpMetaFarm,
     "StrategySushiDiggWbtcLpOptimizer": StrategySushiDiggWbtcLpOptimizer,
     "StrategyPancakeLpOptimizer": StrategyPancakeLpOptimizer,
+    "StrategyUnitProtocolRenbtc": StrategyUnitProtocolRenbtc,
+    "StrategyUniGenericLp": StrategyUniGenericLp,
     "DiggRewardsFaucet": DiggRewardsFaucet,
     "DiggSett": DiggSett,
     "HoneypotMeme": HoneypotMeme,
@@ -41,7 +44,14 @@ name_to_artifact = {
     "UnlockScheduler": UnlockScheduler,
     "AffiliateTokenGatedUpgradeable": AffiliateTokenGatedUpgradeable,
     "VipCappedGuestListWrapperUpgradeable": VipCappedGuestListWrapperUpgradeable,
-    "SimpleWrapperGatedUpgradeable": SimpleWrapperGatedUpgradeable
+    "SimpleWrapperGatedUpgradeable": SimpleWrapperGatedUpgradeable,
+    "BadgerTreeV2": BadgerTreeV2,
+    "GatedProxy": GatedProxy,
+    "RewardsLogger": RewardsLogger,
+    "StabilizeDiggSett": StabilizeDiggSett,
+    "StabilizeStrategyDiggV1": StabilizeStrategyDiggV1,
+    "VipCappedGuestListBbtcUpgradeable": VipCappedGuestListBbtcUpgradeable,
+    "Disperse": Disperse,
 }
 
 

@@ -9,7 +9,7 @@ from helpers.multicall import Multicall
 from helpers.registry import registry
 from helpers.sett.resolvers import (
     SettCoreResolver,
-    StrategyBadgerLpMetaFarmResolver, 
+    StrategyBadgerLpMetaFarmResolver,
     StrategyBasePancakeResolver,
     StrategyHarvestMetaFarmResolver,
     StrategySushiBadgerWbtcResolver,
@@ -19,6 +19,8 @@ from helpers.sett.resolvers import (
     StrategyDiggRewardsResolver,
     StrategySushiDiggWbtcLpOptimizerResolver,
     StrategyDiggLpMetaFarmResolver,
+    StrategyUnitProtocolRenbtcResolver,
+    StrategyUniGenericLpResolver,
 )
 from helpers.utils import digg_shares_to_initial_fragments, val
 from scripts.systems.badger_system import BadgerSystem
@@ -131,11 +133,7 @@ class SnapshotManager:
         # multi.printCalls()
 
         data = multi()
-        self.snaps[snapBlock] = Snap(
-            data,
-            snapBlock,
-            [x[0] for x in entities.items()],
-        )
+        self.snaps[snapBlock] = Snap(data, snapBlock, [x[0] for x in entities.items()],)
 
         return self.snaps[snapBlock]
 
@@ -171,6 +169,10 @@ class SnapshotManager:
             return StrategyDiggLpMetaFarmResolver(self)
         if name == "StrategyPancakeLpOptimizer":
             return StrategyBasePancakeResolver(self)
+        if name == "StrategyUnitProtocolRenbtc":
+            return StrategyUnitProtocolRenbtcResolver(self)
+        if name == "StrategyUniGenericLp":
+            return StrategyUniGenericLpResolver(self)
 
     def settTend(self, overrides, confirm=True):
         user = overrides["from"].address
