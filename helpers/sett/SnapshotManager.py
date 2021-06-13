@@ -133,7 +133,11 @@ class SnapshotManager:
         # multi.printCalls()
 
         data = multi()
-        self.snaps[snapBlock] = Snap(data, snapBlock, [x[0] for x in entities.items()],)
+        self.snaps[snapBlock] = Snap(
+            data,
+            snapBlock,
+            [x[0] for x in entities.items()],
+        )
 
         return self.snaps[snapBlock]
 
@@ -173,6 +177,8 @@ class SnapshotManager:
             return StrategyUnitProtocolRenbtcResolver(self)
         if name == "StrategyUniGenericLp":
             return StrategyUniGenericLpResolver(self)
+        if name == "StabilizeStrategyDiggV1":
+            return StabilizeStrategyDiggV1Resolver(self)
 
     def settTend(self, overrides, confirm=True):
         user = overrides["from"].address

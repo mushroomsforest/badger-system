@@ -21,6 +21,7 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
     address public constant unitVaultParameters = 0xB46F8CF42e504Efe8BEf895f848741daA55e9f1D;
     address public constant debtToken = 0x1456688345527bE1f37E9e627DA0837D6f08C925;
     address public constant eth_usd = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
+    bool public useUnitUsdOracle = true;
 
     // sub-strategy related constants
     address public collateral;
@@ -34,6 +35,9 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
     // collateralization percent buffer in CDP debt actions
     uint256 public ratioBuff = 200;
     uint256 public constant ratioBuffMax = 10000;
+    // used as dust to avoid closing out a debt repayment
+    uint256 public dustMinDebt = 10000;
+    uint256 public constant Q112 = 2**112;
 
     // **** Modifiers **** //
 
@@ -87,7 +91,7 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
     // if borrow is true (for addCollateralAndBorrow): return (maxDebt - currentDebt) if positive value, otherwise return 0
     // if borrow is false (for repayAndRedeemCollateral): return (currentDebt - maxDebt) if positive value, otherwise return 0
     function calculateDebtFor(uint256 collateralAmt, bool borrow) public view returns (uint256) {
-        uint256 maxDebt = collateralValue(collateralAmt).mul(ratioBuffMax).div(_getBufferedMinRatio(ratioBuffMax));
+        uint256 maxDebt = collateralAmt > 0? collateralValue(collateralAmt).mul(ratioBuffMax).div(_getBufferedMinRatio(ratioBuffMax)) : 0;
 
         uint256 debtAmt = getDebtBalance();
 
@@ -114,7 +118,8 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
     }
 
     function requiredPaidDebt(uint256 _redeemCollateralAmt) public view returns (uint256) {
-        uint256 collateralAmt = getCollateralBalance().sub(_redeemCollateralAmt);
+        uint256 totalCollateral = getCollateralBalance();
+        uint256 collateralAmt = _redeemCollateralAmt >= totalCollateral? 0 : totalCollateral.sub(_redeemCollateralAmt);
         return calculateDebtFor(collateralAmt, false);
     }
 
@@ -126,16 +131,24 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
     // **** Oracle (using chainlink) ****
 
     function getLatestCollateralPrice() public view returns (uint256) {
+        if (useUnitUsdOracle){
+            address unitOracleRegistry = IUnitCDPManager(cdpMgr01).oracleRegistry();
+            address unitUsdOracle = IUnitOracleRegistry(unitOracleRegistry).oracleByAsset(collateral);
+            uint usdPriceInQ122 = IUnitUsdOracle(unitUsdOracle).assetToUsd(collateral, collateralDecimal);
+            return uint256(usdPriceInQ122 / Q112).mul(collateralPriceDecimal).div(1e18);// usd price from unit protocol oracle in 1e18 decimal		
+        }
+	
         require(unitOracle != address(0), "!_collateralOracle");
 
         (, int256 price, , , ) = IChainlinkAggregator(unitOracle).latestRoundData();
 
         if (price > 0) {
-            int256 ethPrice = 1;
             if (collateralPriceEth) {
-                (, ethPrice, , , ) = IChainlinkAggregator(eth_usd).latestRoundData(); // eth price from chainlink in 1e8 decimal
+                (, int256 ethPrice, , , ) = IChainlinkAggregator(eth_usd).latestRoundData(); // eth price from chainlink in 1e8 decimal
+                return uint256(price).mul(collateralPriceDecimal).mul(uint256(ethPrice)).div(1e8).div(collateralPriceEth ? 1e18 : 1);
+            } else{
+                return uint256(price).mul(collateralPriceDecimal).div(1e8);
             }
-            return uint256(price).mul(collateralPriceDecimal).mul(uint256(ethPrice)).div(1e8).div(collateralPriceEth ? 1e18 : 1);
         } else {
             return 0;
         }
@@ -151,6 +164,16 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
     function setRatioBuff(uint256 _ratioBuff) external {
         _onlyGovernance();
         ratioBuff = _ratioBuff;
+    }
+
+    function setDustMinDebt(uint256 _dustDebt) external {
+        _onlyGovernance();
+        dustMinDebt = _dustDebt;
+    }
+
+    function setUseUnitUsdOracle(bool _useUnitUsdOracle) external {
+        _onlyGovernance();
+        useUnitUsdOracle = _useUnitUsdOracle;
     }
 
     // **** Unit Protocol CDP actions ****
@@ -176,19 +199,21 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
         if (requiredPaidback > 0) {
             _withdrawUSDP(requiredPaidback);
 
-            uint256 _actualPaidDebt = IERC20Upgradeable(debtToken).balanceOf(address(this));
-            uint256 _fee = getDebtBalance().sub(getDebtWithoutFee());
+            uint256 _currentDebtVal = IERC20Upgradeable(debtToken).balanceOf(address(this));
+            uint256 _actualPaidDebt = _currentDebtVal;
+            uint256 _totalDebtWithoutFee = getDebtWithoutFee();
+            uint256 _fee = getDebtBalance().sub(_totalDebtWithoutFee);
 
             require(_actualPaidDebt > _fee, "!notEnoughForFee");
             _actualPaidDebt = _actualPaidDebt.sub(_fee); // unit protocol will charge fee first
-            _actualPaidDebt = _capMaxDebtPaid(_actualPaidDebt);
+            _actualPaidDebt = _capMaxDebtPaid(_actualPaidDebt, _totalDebtWithoutFee);
 
-            require(IERC20Upgradeable(debtToken).balanceOf(address(this)) >= _actualPaidDebt.add(_fee), "!notEnoughRepayment");
+            require(_currentDebtVal >= _actualPaidDebt.add(_fee), "!notEnoughRepayment");
             repayAndRedeemCollateral(0, _actualPaidDebt);
         }
     }
 
-    /// @dev Internal deposit logic to be implemented by Stratgies
+    /// @dev Internal deposit logic to be implemented by Strategies
     function _deposit(uint256 _want) internal override {
         if (_want > 0) {
             uint256 _newDebt = calculateDebtFor(_want.add(getCollateralBalance()), true);
@@ -201,8 +226,8 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
     }
 
     // to avoid repay all debt resulting to close the CDP unexpectedly
-    function _capMaxDebtPaid(uint256 _actualPaidDebt) internal view returns (uint256) {
-        uint256 _maxDebtToRepay = getDebtWithoutFee().sub(ratioBuffMax);
+    function _capMaxDebtPaid(uint256 _actualPaidDebt, uint256 _totalDebtWithoutFee) internal view returns (uint256) {
+        uint256 _maxDebtToRepay = _totalDebtWithoutFee.sub(dustMinDebt);
         return _actualPaidDebt >= _maxDebtToRepay ? _maxDebtToRepay : _actualPaidDebt;
     }
 
@@ -218,17 +243,19 @@ abstract contract StrategyUnitProtocolMeta is BaseStrategy {
             _withdrawUSDP(requiredPaidback);
         }
 
-        bool _fullWithdraw = _amount == balanceOfPool();
+        bool _fullWithdraw = _amount >= balanceOfPool();
         uint256 _wantBefore = IERC20Upgradeable(want).balanceOf(address(this));
         if (!_fullWithdraw) {
-            uint256 _actualPaidDebt = IERC20Upgradeable(debtToken).balanceOf(address(this));
-            uint256 _fee = getDebtBalance().sub(getDebtWithoutFee());
+            uint256 _currentDebtVal = IERC20Upgradeable(debtToken).balanceOf(address(this));
+            uint256 _actualPaidDebt = _currentDebtVal;
+            uint256 _totalDebtWithoutFee = getDebtWithoutFee();
+            uint256 _fee = getDebtBalance().sub(_totalDebtWithoutFee);
 
             require(_actualPaidDebt > _fee, "!notEnoughForFee");
             _actualPaidDebt = _actualPaidDebt.sub(_fee); // unit protocol will charge fee first
-            _actualPaidDebt = _capMaxDebtPaid(_actualPaidDebt);
+            _actualPaidDebt = _capMaxDebtPaid(_actualPaidDebt, _totalDebtWithoutFee);
 
-            require(IERC20Upgradeable(debtToken).balanceOf(address(this)) >= _actualPaidDebt.add(_fee), "!notEnoughRepayment");
+            require(_currentDebtVal >= _actualPaidDebt.add(_fee), "!notEnoughRepayment");
             repayAndRedeemCollateral(_amount, _actualPaidDebt);
         } else {
             require(IERC20Upgradeable(debtToken).balanceOf(address(this)) >= getDebtBalance(), "!notEnoughFullRepayment");

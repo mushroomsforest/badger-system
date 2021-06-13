@@ -76,7 +76,7 @@ def calc_sett_rewards(badger, periodStartBlock, endBlock, cycle):
     with open("badger-boosts.json", "w") as fp:
         json.dump(boostsMetadata, fp)
 
-    upload_boosts(test=True)
+    upload_boosts(test=False)
 
     return rewards
 
@@ -244,7 +244,11 @@ def generate_rewards_in_range(badger, startBlock, endBlock, pastRewards):
     # Sanity check new rewards file
 
     verify_rewards(
-        badger, startBlock, endBlock, pastRewards, after_file,
+        badger,
+        startBlock,
+        endBlock,
+        pastRewards,
+        after_file,
     )
 
     return {
@@ -343,7 +347,6 @@ def guardian(badger: BadgerSystem, startBlock, endBlock, pastRewards, test=False
             {"from": badger.guardian, "gas_price": gas_strategy},
         )
         upload(rewards_data["contentFileName"]),
-        
 
 
 def run_action(badger, args, test):

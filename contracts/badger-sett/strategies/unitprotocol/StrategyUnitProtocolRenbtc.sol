@@ -105,7 +105,7 @@ contract StrategyUnitProtocolRenbtc is StrategyUnitProtocolMeta {
 
     // **** State Mutation functions ****
 
-    function getHarvestable() external returns (uint256) {
+    function getHarvestable() external view returns (uint256) {
         return ICurveGauge(usdp_gauge).claimable_tokens(address(this));
     }
 
@@ -172,10 +172,12 @@ contract StrategyUnitProtocolRenbtc is StrategyUnitProtocolMeta {
     }
 
     function _depositUSDP(uint256 _usdpAmt) internal override {
-        if (_usdpAmt > 0 && checkSlip(_usdpAmt)) {
+        uint256 _expectedOut = _usdpAmt.mul(1e18).div(virtualPriceToWant());
+        uint256 _maxSlip = _expectedOut.mul(MAX_FEE.sub(slippageProtectionIn)).div(MAX_FEE);
+        if (_usdpAmt > 0 && checkSlip(_usdpAmt, _maxSlip)) {
             _safeApproveHelper(usdp, curvePool, _usdpAmt);
             uint256[2] memory amounts = [_usdpAmt, 0];
-            ICurveFi(curvePool).add_liquidity(amounts, 0);
+            ICurveFi(curvePool).add_liquidity(amounts, _maxSlip);
         }
 
         uint256 _usdp3crv = IERC20Upgradeable(usdp3crv).balanceOf(address(this));
@@ -215,16 +217,12 @@ contract StrategyUnitProtocolRenbtc is StrategyUnitProtocolMeta {
     }
 
     function estimateRequiredUsdp3crv(uint256 _usdpAmt) public view returns (uint256) {
-        uint256[2] memory amounts = [_usdpAmt, 0];
-        return ICurveExchange(curvePool).calc_token_amount(amounts, false);
+        return _usdpAmt.mul(1e18).div(virtualPriceToWant());
     }
 
-    function checkSlip(uint256 _usdpAmt) public view returns (bool) {
-        uint256 expectedOut = _usdpAmt.mul(1e18).div(virtualPriceToWant());
-        uint256 maxSlip = expectedOut.mul(MAX_FEE.sub(slippageProtectionIn)).div(MAX_FEE);
-
+    function checkSlip(uint256 _usdpAmt, uint256 _maxSlip) public view returns (bool) {
         uint256[2] memory amounts = [_usdpAmt, 0];
-        return ICurveExchange(curvePool).calc_token_amount(amounts, true) >= maxSlip;
+        return ICurveExchange(curvePool).calc_token_amount(amounts, true) >= _maxSlip;
     }
 
     function usdpOfPool() public view returns (uint256) {
@@ -239,8 +237,8 @@ contract StrategyUnitProtocolRenbtc is StrategyUnitProtocolMeta {
         }
         // use underestimate of current assets.
         uint256 virtualOut = virtualPriceToWant().mul(_usdp3crv).div(1e18);
-        uint256 realOut = ICurveFi(curvePool).calc_withdraw_one_coin(_usdp3crv, 0);
-        return virtualOut > realOut ? realOut : virtualOut;
+        // uint256 realOut = ICurveFi(curvePool).calc_withdraw_one_coin(_usdp3crv, 0);
+        return virtualOut; // virtualOut > realOut? realOut : virtualOut;
     }
 
     /// @notice Specify tokens used in yield process, should not be available to withdraw via withdrawOther()
